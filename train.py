@@ -88,7 +88,11 @@ def main(argv=None):
         num_workers=train_config["num_workers"], pin_memory=device.type == "cuda",
         generator=generator, drop_last=False, persistent_workers=False,
     )
-    model = create_model(config["method"]["name"], **config["method"]["params"]).to(device)
+    model_params = copy.deepcopy(config["method"]["params"])
+    if checkpoint and "pretrained" in model_params:
+        # Resume restores the encoder from the checkpoint; do not download ImageNet weights again.
+        model_params["pretrained"] = False
+    model = create_model(config["method"]["name"], **model_params).to(device)
     criterion = BCEDiceLoss(**config["loss"])
     optimizer = torch.optim.AdamW(model.parameters(), lr=train_config["lr"],
                                   weight_decay=train_config["weight_decay"])

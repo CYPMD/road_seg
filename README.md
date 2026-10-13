@@ -38,9 +38,10 @@ python -m pip install 'torch>=2.4,<3' --index-url https://download.pytorch.org/w
 python -m pip install -r requirements.txt
 ```
 
-The implementation uses plain PyTorch; torchvision and pretrained downloads are
-not needed. CUDA mixed precision is enabled automatically when available. MPS
-and CPU use float32. Hardware paths other than CPU have not been exercised here.
+The plain U-Net uses PyTorch only. The ResNet-34 U-Net uses torchvision and, when
+`pretrained: true`, downloads the official ImageNet-1K ResNet-34 weights on the
+first fresh training run. CUDA mixed precision is enabled automatically when
+available. MPS and CPU use float32.
 
 ## 2. Point the config at your dataset
 
@@ -90,6 +91,17 @@ provide separate train/validation folders if nearby scenes must be kept apart.
 python train.py --config configs/unet.yaml --method unet \
   --data-root /absolute/path/to/deepglobe --output-dir runs/unet
 ```
+
+Train the ResNet-34 U-Net with ImageNet initialization:
+
+```bash
+python train.py --config configs/unet_resnet34.yaml --method unet_resnet34 \
+  --data-root /absolute/path/to/deepglobe --output-dir runs/unet_resnet34
+```
+
+The ResNet-34 config uses ImageNet mean/std normalization and sets `pretrained: true`.
+Resume and checkpoint-based inference do not download ImageNet weights again; the
+saved model state is restored directly.
 
 The default U-Net uses four downsampling stages and base width 32, with batch
 normalization, transpose-convolution upsampling and skip connections. It trains

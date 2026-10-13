@@ -35,6 +35,7 @@ def test_unet_resnet34_backward_reaches_encoder_and_decoder():
 def test_unet_resnet34_checkpoint_roundtrip(tmp_path):
     config = load_config("configs/unet_resnet34.yaml")
     config["method"]["params"]["base_channels"] = 4
+    config["method"]["params"]["pretrained"] = False
     model = create_model(config["method"]["name"], **config["method"]["params"]).eval()
     image = torch.randn(1, 3, 65, 67)
     with torch.no_grad():
@@ -61,7 +62,15 @@ def test_unet_resnet34_config_preserves_experiment_settings():
     baseline = load_config("configs/unet.yaml")
     config = load_config("configs/unet_resnet34.yaml")
     assert config["method"]["name"] == "unet_resnet34"
+    assert config["method"]["params"]["pretrained"] is True
+    assert config["preprocessing"]["mean"] == [0.485, 0.456, 0.406]
+    assert config["preprocessing"]["std"] == [0.229, 0.224, 0.225]
     assert config["train"]["output_dir"] == "runs/unet_resnet34"
+
+    # Apart from the architecture-specific initialization/normalization and output path,
+    # keep the experiment settings aligned with the plain U-Net baseline.
     config["method"]["name"] = baseline["method"]["name"]
+    config["method"]["params"].pop("pretrained")
+    config["preprocessing"] = baseline["preprocessing"]
     config["train"]["output_dir"] = baseline["train"]["output_dir"]
     assert config == baseline

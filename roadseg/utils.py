@@ -68,6 +68,10 @@ def model_from_checkpoint(checkpoint, device, method=None):
     settings = checkpoint["config"]["method"]
     if method is not None and method != settings["name"]:
         raise ValueError(f"Requested method {method!r} does not match checkpoint {settings['name']!r}")
-    model = create_model(settings["name"], **settings["params"]).to(device)
+    params = dict(settings["params"])
+    if "pretrained" in params:
+        # Checkpoint weights fully replace initialization; avoid network/cache dependency.
+        params["pretrained"] = False
+    model = create_model(settings["name"], **params).to(device)
     model.load_state_dict(checkpoint["model"], strict=True)
     return model.eval()

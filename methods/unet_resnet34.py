@@ -1,63 +1,44 @@
-"""U-Net with a ResNet-34 encoder and raw, full-resolution output logits.
+"""U-Net with a torchvision ResNet-34 encoder and full-resolution raw logits.
 
-The encoder uses the standard [3, 4, 6, 3] basic-block layout with widths
-64, 128, 256 and 512. It is initialized from scratch; no pretrained weights
-or torchvision dependency are required. ``base_channels`` controls only the
-decoder width, leaving the ResNet-34 encoder unchanged.
+The encoder uses the standard ResNet-34 [3, 4, 6, 3] layout with widths
+64, 128, 256 and 512. Set ``pretrained=True`` to initialize the RGB encoder
+from torchvision's ImageNet-1K weights. ``base_channels`` controls only the
+decoder width; the ResNet-34 encoder widths remain fixed.
 """
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torchvision.models import ResNet34_Weights, resnet34
 
 from .unet import DoubleConv
 
 
-class _BasicBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride,
-                               padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.shortcut = nn.Identity()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels),
-            )
-
-    def forward(self, x):
-        identity = self.shortcut(x)
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.bn2(self.conv2(x))
-        return self.relu(x + identity)
-
-
 class _ResNet34Encoder(nn.Module):
-    def __init__(self, in_channels: int):
+    def __init__(self, in_channels: int, pretrained: bool = False):
         super().__init__()
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, 64, 7, stride=2, padding=3, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-        )
-        self.pool = nn.MaxPool2d(3, stride=2, padding=1)
-        self.stages = nn.ModuleList()
-        previous = 64
-        for index, (width, count) in enumerate(zip((64, 128, 256, 512), (3, 4, 6, 3))):
-            blocks = [_BasicBlock(previous, width, stride=1 if index == 0 else 2)]
-            blocks.extend(_BasicBlock(width, width) for _ in range(count - 1))
-            self.stages.append(nn.Sequential(*blocks))
-            previous = width
-        for module in self.modules():
-            if isinstance(module, nn.Conv2d):
-                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(module, nn.BatchNorm2d):
-                nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
+        if pretrained and in_channels != 3:
+            raise ValueError("ImageNet-pretrained ResNet-34 requires in_channels=3")
+
+        weights = ResNet34_Weights.DEFAULT if pretrained else None
+        backbone = resnet34(weights=weights)
+
+        # torchvision's pretrained conv1 is RGB-only. For other channel counts,
+        # keep the same architecture but create a fresh first convolution.
+        if in_channels != 3:
+            backbone.conv1 = nn.Conv2d(
+                in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False
+            )
+            nn.init.kaiming_normal_(backbone.conv1.weight, mode="fan_out", nonlinearity="relu")
+
+        self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu)
+        self.pool = backbone.maxpool
+        self.stages = nn.ModuleList([
+            backbone.layer1,
+            backbone.layer2,
+            backbone.layer3,
+            backbone.layer4,
+        ])
 
     def forward(self, x):
         x = self.stem(x)
@@ -85,11 +66,11 @@ class _Up(nn.Module):
 
 
 class ResNet34UNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, base_channels=32):
+    def __init__(self, in_channels=3, out_channels=1, base_channels=32, pretrained=False):
         super().__init__()
         if min(in_channels, out_channels, base_channels) < 1:
             raise ValueError("Channel counts must be positive")
-        self.encoder = _ResNet34Encoder(in_channels)
+        self.encoder = _ResNet34Encoder(in_channels, pretrained=pretrained)
         widths = [base_channels * factor for factor in (8, 4, 2, 1, 1)]
         self.decoder = nn.ModuleList()
         previous = 512
@@ -111,5 +92,10 @@ class ResNet34UNet(nn.Module):
         return self.head(x)  # Do not apply sigmoid; the shared pipeline owns it.
 
 
-def build_model(in_channels=3, out_channels=1, base_channels=32) -> nn.Module:
-    return ResNet34UNet(in_channels, out_channels, base_channels)
+def build_model(in_channels=3, out_channels=1, base_channels=32, pretrained=False) -> nn.Module:
+    return ResNet34UNet(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        base_channels=base_channels,
+        pretrained=pretrained,
+    )
