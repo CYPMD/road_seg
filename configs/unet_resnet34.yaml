@@ -1,0 +1,47 @@
+seed: 42
+
+method:
+  name: unet_resnet34
+  params:
+    in_channels: 3
+    out_channels: 1
+    base_channels: 32       # Decoder width; ResNet-34 encoder widths stay fixed.
+
+data:
+  root: /path/to/deepglobe
+  train_images: train         # Relative to root; use . for a flat directory.
+  train_masks: null           # null: masks alongside images.
+  val_images: null            # null: split labeled training images by seed.
+  val_masks: null
+  val_fraction: 0.15
+  image_suffix: _sat.jpg
+  mask_suffix: _mask.png
+  mask_threshold: 128         # For masks stored as 0/1, set this to 1.
+  crop_size: 256
+  crops_per_image: 4           # Independent random crops per image per epoch.
+  augment: true              # Paired flips and 90-degree rotations.
+
+preprocessing:
+  mean: [0.5, 0.5, 0.5]       # RGB / 255, then (image - mean) / std.
+  std: [0.5, 0.5, 0.5]
+
+loss:
+  bce_weight: 0.5
+  dice_weight: 0.5
+
+train:
+  output_dir: runs/unet_resnet34
+  epochs: 50
+  batch_size: 8
+  num_workers: 4
+  lr: 0.001
+  weight_decay: 0.0001
+  grad_clip_norm: 1.0
+  device: auto              # auto chooses CUDA, then MPS, then CPU.
+  amp: true                 # Mixed precision on CUDA only.
+
+inference:
+  patch_size: 256
+  overlap: 0.5               # stride = 256 * (1 - 0.5) = 128.
+  batch_size: 16
+  threshold: 0.5
