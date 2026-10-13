@@ -40,8 +40,9 @@ python -m pip install -r requirements.txt
 
 The plain U-Net uses PyTorch only. The ResNet-34 U-Net uses torchvision and, when
 `pretrained: true`, downloads the official ImageNet-1K ResNet-34 weights on the
-first fresh training run. CUDA mixed precision is enabled automatically when
-available. MPS and CPU use float32.
+first fresh training run. The plain U-Net enables CUDA mixed precision by default.
+ResNet-34 U-Net defaults to float32 for numerical stability. MPS and CPU use
+float32. Override training precision with `--amp` or `--no-amp`.
 
 ## 2. Point the config at your dataset
 
@@ -102,6 +103,14 @@ python train.py --config configs/unet_resnet34.yaml --method unet_resnet34 \
 The ResNet-34 config uses ImageNet mean/std normalization and sets `pretrained: true`.
 Resume and checkpoint-based inference do not download ImageNet weights again; the
 saved model state is restored directly.
+
+If a previous run failed with nonfinite validation probabilities, install the
+updated files and start with `--no-amp` in a **new** output directory. A finite
+training loss alone does not prove that BatchNorm running statistics are valid.
+The updated trainer checks model parameters/buffers and unscaled gradients;
+invalid full-precision gradients are rejected before the optimizer update.
+Valid checkpoints can also be resumed with `--no-amp`, which overrides their
+saved AMP setting. See [NUMERICAL_FIX.md](NUMERICAL_FIX.md) for Colab commands.
 
 The default U-Net uses four downsampling stages and base width 32, with batch
 normalization, transpose-convolution upsampling and skip connections. It trains
@@ -178,6 +187,9 @@ At the defaults, tile origins along each axis are 0, 128, 256, 384, 512, 640 and
 768 for a 1024px image. The code applies sigmoid to each tile's logits, sums the
 probabilities at each covered pixel, divides by the number of contributing
 tiles, and only then applies the threshold. It does not average binary masks.
+If AMP produces nonfinite logits, that tile batch is recomputed in float32 and
+the remaining tiles of the image use float32. Invalid float32 outputs still
+raise an error; values are never replaced with fabricated probabilities.
 
 For arbitrary image dimensions, an additional tile is anchored to each final
 edge if needed; its overlap can exceed 50%. Images smaller than a patch use edge

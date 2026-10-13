@@ -8,6 +8,20 @@ import torch
 from methods import create_model
 
 
+@torch.no_grad()
+def check_model_finite(model, context="model"):
+    """Validate parameters AND buffers; GradScaler does not protect BN buffers."""
+    for kind, tensors in (("parameter", model.named_parameters()),
+                          ("buffer", model.named_buffers())):
+        for name, tensor in tensors:
+            if (tensor.is_floating_point() or tensor.is_complex()) and not torch.isfinite(tensor).all():
+                raise FloatingPointError(
+                    f"{context}: nonfinite {kind} '{name}'. "
+                    "The model state is invalid; disabling AMP cannot repair it. "
+                    "Restart with --no-amp in a new output directory, or resume a known-good checkpoint."
+                )
+
+
 def select_device(name="auto"):
     if name == "auto":
         name = "cuda" if torch.cuda.is_available() else (
@@ -74,4 +88,5 @@ def model_from_checkpoint(checkpoint, device, method=None):
         params["pretrained"] = False
     model = create_model(settings["name"], **params).to(device)
     model.load_state_dict(checkpoint["model"], strict=True)
+    check_model_finite(model, "loaded checkpoint")
     return model.eval()

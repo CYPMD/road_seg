@@ -40,7 +40,7 @@ train:
   weight_decay: 0.0001
   grad_clip_norm: 1.0
   device: auto              # auto chooses CUDA, then MPS, then CPU.
-  amp: true                 # Mixed precision on CUDA only.
+  amp: false                # Float32 default for numerical stability; opt in with --amp.
 
 inference:
   patch_size: 256

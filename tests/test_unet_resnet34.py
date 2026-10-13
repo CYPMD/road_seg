@@ -66,11 +66,13 @@ def test_unet_resnet34_config_preserves_experiment_settings():
     assert config["preprocessing"]["mean"] == [0.485, 0.456, 0.406]
     assert config["preprocessing"]["std"] == [0.229, 0.224, 0.225]
     assert config["train"]["output_dir"] == "runs/unet_resnet34"
+    assert config["train"]["amp"] is False
 
-    # Apart from the architecture-specific initialization/normalization and output path,
+    # Apart from initialization/normalization, the safe precision default and output path,
     # keep the experiment settings aligned with the plain U-Net baseline.
     config["method"]["name"] = baseline["method"]["name"]
     config["method"]["params"].pop("pretrained")
     config["preprocessing"] = baseline["preprocessing"]
     config["train"]["output_dir"] = baseline["train"]["output_dir"]
+    config["train"]["amp"] = baseline["train"]["amp"]
     assert config == baseline

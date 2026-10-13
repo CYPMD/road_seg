@@ -35,6 +35,8 @@ def main(argv=None):
     parser.add_argument("--output-dir")
     parser.add_argument("--epochs", type=int, help="Total epoch count, including completed epochs")
     parser.add_argument("--device", help="auto, cpu, cuda, cuda:0, or mps")
+    parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=None,
+                        help="Override train.amp; --no-amp forces float32, including on resume")
     parser.add_argument("--resume", help="Path to a run's last.pt; continue in that run directory")
     args = parser.parse_args(argv)
 
@@ -45,6 +47,8 @@ def main(argv=None):
         config["method"]["name"] = args.method
     if args.data_root:
         config["data"]["root"] = args.data_root
+    if args.amp is not None:
+        config["train"]["amp"] = args.amp
     for argument, key in ((args.output_dir, "output_dir"), (args.epochs, "epochs"), (args.device, "device")):
         if argument is not None:
             config["train"][key] = argument

@@ -1,5 +1,24 @@
 # Verification record
 
+## Numerical stability update (2026-10-13)
+
+`python -m pytest -q`: **42 passed, 1 skipped** with the updated files.
+The skipped integration test requires CUDA. CPU regression tests simulate
+AMP-only NaN/Inf outputs under autocast and verify the float32 retry, invalid
+state diagnostics, and handling of nonfinite gradients.
+
+The real CLI smoke test passed again, including training, resume, evaluation,
+and 49-tile inference. A separate ResNet-34 U-Net CPU training/validation run
+also passed and verified the new `--no-amp` override.
+
+Versions: Python 3.12.14, PyTorch 2.6.0+cpu, torchvision 0.21.0+cpu,
+NumPy 2.5.2, Pillow 12.3.0, PyYAML 6.0.3, tqdm 4.70.1, pytest 9.1.1.
+This host cannot initialize float16 CPU kernels and has no CUDA device.
+Real GPU AMP behavior, Python 3.13, pretrained downloads, and DeepGlobe
+convergence were not tested. See [NUMERICAL_FIX.md](NUMERICAL_FIX.md).
+
+## Original baseline verification (retained)
+
 Verified on 2026-10-13, on CPU, with:
 
 | Component | Version |
