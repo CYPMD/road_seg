@@ -1,5 +1,6 @@
 import pytest
 import torch
+from pathlib import Path
 
 from methods import available_methods, create_model
 from methods import transunet
@@ -32,7 +33,9 @@ def test_transunet_default_architecture_and_256_forward():
     assert "transunet" in available_methods()
     assert "_modeling" not in available_methods()
     config = load_config("configs/transunet.yaml")
-    model = create_model("transunet", **config["method"]["params"]).eval()
+    # Keep unit tests offline; real ImageNet checkpoint loading is checked separately.
+    params = dict(config["method"]["params"], pretrained=False)
+    model = create_model("transunet", **params).eval()
     encoder = model.transformer
     assert len(encoder.encoder.layer) == 12
     assert encoder.embeddings.position_embeddings.shape == (1, 256, 768)
@@ -47,7 +50,7 @@ def test_transunet_default_architecture_and_256_forward():
 
 @pytest.mark.parametrize("height,width", [(256, 256), (65, 97), (32, 32), (48, 80)])
 def test_transunet_sizes_and_raw_logits(small_transunet, height, width):
-    model = create_model("transunet").eval()
+    model = create_model("transunet", pretrained=False).eval()
     # Negative logits detect accidental sigmoid, softmax or ReLU on the output.
     with torch.no_grad():
         model.segmentation_head[0].weight.zero_()
@@ -58,7 +61,7 @@ def test_transunet_sizes_and_raw_logits(small_transunet, height, width):
 
 
 def test_transunet_backward_reaches_cnn_transformer_and_decoder(small_transunet):
-    model = create_model("transunet")
+    model = create_model("transunet", pretrained=False)
     output = model(torch.randn(2, 3, 65, 97))
     loss = BCEDiceLoss()(output, torch.zeros_like(output))
     loss.backward()
@@ -76,10 +79,17 @@ def test_transunet_backward_reaches_cnn_transformer_and_decoder(small_transunet)
         assert parameter.grad.abs().sum() > 0
 
 
-def test_transunet_checkpoint_does_not_need_pretrained_file(small_transunet, tmp_path):
+@pytest.mark.parametrize("use_local_path", [False, True])
+def test_transunet_checkpoint_does_not_need_pretrained_file(
+        small_transunet, tmp_path, monkeypatch, use_local_path):
+    def unexpected_weights_request(path):
+        raise AssertionError("Restoring a checkpoint must not download or read initialization weights")
+
+    monkeypatch.setattr(transunet, "_pretrained_weights_path", unexpected_weights_request)
     config = load_config("configs/transunet.yaml")
     config["method"]["params"].update(
-        pretrained=True, pretrained_path=str(tmp_path / "unavailable.npz")
+        pretrained=True,
+        pretrained_path=str(tmp_path / "unavailable.npz") if use_local_path else None,
     )
     params = dict(config["method"]["params"], pretrained=False)
     model = create_model("transunet", **params).eval()
@@ -95,7 +105,7 @@ def test_transunet_checkpoint_does_not_need_pretrained_file(small_transunet, tmp
 
 
 def test_transunet_tiled_inference(small_transunet):
-    model = create_model("transunet").train()
+    model = create_model("transunet", pretrained=False).train()
     probabilities = predict_tiled(model, torch.randn(3, 79, 113), "cpu",
                                   patch_size=64, overlap=0.5, batch_size=2)
     assert probabilities.shape == (79, 113)
@@ -105,7 +115,7 @@ def test_transunet_tiled_inference(small_transunet):
 
 
 def test_transunet_single_channel_and_multiple_output_channels(small_transunet):
-    model = create_model("transunet", in_channels=1, out_channels=2).eval()
+    model = create_model("transunet", in_channels=1, out_channels=2, pretrained=False).eval()
     with torch.no_grad():
         output = model(torch.randn(1, 1, 48, 64))
     assert output.shape == (1, 2, 48, 64)
@@ -134,11 +144,38 @@ def test_pretrained_positions_reject_invalid_grid():
         _prepare_position_embeddings(torch.zeros(1, 7, 4), (2, 2), 4)
 
 
-def test_transunet_pretrained_requires_explicit_existing_file(tmp_path):
-    with pytest.raises(ValueError, match="pretrained_path"):
-        create_model("transunet", pretrained=True)
+def test_transunet_explicit_pretrained_file_must_exist(tmp_path):
     with pytest.raises(FileNotFoundError, match="pretrained weights"):
         create_model("transunet", pretrained=True, pretrained_path=str(tmp_path / "missing.npz"))
+
+
+def test_transunet_automatic_weights_download_is_cached(tmp_path, monkeypatch):
+    downloads = []
+    monkeypatch.setattr(transunet, "get_dir", lambda: str(tmp_path))
+
+    def download(url, destination, hash_prefix, progress):
+        downloads.append((url, hash_prefix))
+        Path(destination).write_bytes(b"test cached checkpoint")
+
+    monkeypatch.setattr(transunet, "download_url_to_file", download)
+    first = transunet._pretrained_weights_path(None)
+    second = transunet._pretrained_weights_path(None)
+    assert first == second and first.is_file()
+    assert downloads == [(transunet._PRETRAINED_URL, transunet._PRETRAINED_SHA256)]
+    # An explicit user-supplied file also bypasses the downloader.
+    assert transunet._pretrained_weights_path(str(first)) == first
+    assert len(downloads) == 1
+
+
+def test_transunet_download_failure_stops_model_creation(tmp_path, monkeypatch):
+    monkeypatch.setattr(transunet, "get_dir", lambda: str(tmp_path))
+
+    def unavailable(*args, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(transunet, "download_url_to_file", unavailable)
+    with pytest.raises(RuntimeError, match="Pretrained initialization is required"):
+        create_model("transunet")  # Pretraining is the factory default too.
 
 
 @pytest.mark.parametrize("params,match", [
@@ -156,7 +193,8 @@ def test_transunet_config_preserves_experiment_settings():
     baseline = load_config("configs/unet.yaml")
     config = load_config("configs/transunet.yaml")
     assert config["method"]["name"] == "transunet"
-    assert config["method"]["params"]["pretrained"] is False
+    assert config["method"]["params"]["pretrained"] is True
+    assert config["method"]["params"]["pretrained_path"] is None
     assert config["method"]["params"]["img_size"] == 256
     assert config["train"]["output_dir"] == "runs/transunet"
     config["method"] = baseline["method"]

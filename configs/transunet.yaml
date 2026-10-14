@@ -6,8 +6,8 @@ method:
     in_channels: 3
     out_channels: 1
     img_size: 256           # Learned position grid; supports other patch sizes too.
-    pretrained: false       # Set true and supply the matching local .npz to initialize the encoder.
-    pretrained_path: null   # e.g. /content/R50+ViT-B_16.npz (ignored when pretrained is false).
+    pretrained: true        # Initialize BOTH the hybrid ResNet and ViT from ImageNet-21k.
+    pretrained_path: null   # Download/cache automatically; or set a local R50+ViT-B_16.npz path.
 
 data:
   root: /path/to/deepglobe
